@@ -92,14 +92,23 @@ These match the brief's modules (M0 to M15):
    - `cvs` (private, public upload only into open jobs)
    - `avatars` (public)
 
-6. AI copilot (optional):
+6. Invitation emails (needed so invited employees get an email):
+   ```
+   supabase functions deploy invite-user
+   ```
+   Or use Dashboard → Edge Functions → "Deploy a new function", name it `invite-user` and paste `supabase/functions/invite-user/index.ts`.
+   - No secret is needed: the function uses the project's built-in service key on the server.
+   - Supabase's built-in email sender only delivers to your own team's addresses and only a few emails per hour. For real employees, add your own SMTP under Authentication → Emails → SMTP Settings (Resend, Brevo, Gmail SMTP, etc.).
+   - Add `http://localhost:3000/**` (and later your live domain) to Authentication → URL Configuration → Redirect URLs, so the invite link opens the "Set your password" page.
+
+7. AI copilot (optional):
    ```
    supabase functions deploy copilot
    supabase secrets set ANTHROPIC_API_KEY=your-key
    ```
    You can also set `COPILOT_MODEL` to pick a model.
 
-7. To make yourself platform super admin, run this in the SQL editor:
+8. To make yourself platform super admin, run this in the SQL editor:
    ```
    update profiles set is_platform_admin = true where email = 'you@company.com';
    ```

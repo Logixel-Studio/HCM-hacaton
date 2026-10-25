@@ -10,6 +10,7 @@ import { openFile, q, rpc, useAction, useRows, useRpc } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { can, GRANTABLE_ROLES, ROLE_INFO, type Role } from "@/lib/roles";
 import { fmtDate, fmtTime, minutes, money, title, today } from "@/lib/format";
+import { inviteMessage, inviteUser } from "@/lib/invite";
 
 type Emp = Record<string, string | null> & { id: string; full_name: string; status: string; employee_code: string; skills: string[] };
 type Private = Record<string, string | null>;
@@ -239,9 +240,9 @@ function LetterDialog({ open, onClose, employeeId }: { open: boolean; onClose: (
 
 function InviteDialog({ open, onClose, employeeId, email }: { open: boolean; onClose: () => void; employeeId: string; email: string }) {
   const [em, setEm] = useState(email); const [r, setR] = useState<Role>("employee");
-  const a = useAction(() => rpc<string>("invite_user", { p_email: em, p_role: r, p_employee: employeeId }), { success: (res) => res === "added" ? "User added to the company" : "Invitation saved — they join when they sign up with this email", invalidate: ["members"], onDone: onClose });
+  const a = useAction(() => inviteUser(em, r, employeeId), { success: inviteMessage, invalidate: ["members", "employee"], onDone: onClose });
   return (
-    <Dialog open={open} onClose={onClose} title="Invite to the app">
+    <Dialog open={open} onClose={onClose} title="Invite to the app" description="They get an email with a link to set their password and join.">
       <div className="space-y-4">
         <Field label="Email"><Input type="email" value={em} onChange={(ev) => setEm(ev.target.value)} /></Field>
         <Field label="Role"><Select value={r} onChange={(ev) => setR(ev.target.value as Role)}>{GRANTABLE_ROLES.map((x) => <option key={x} value={x}>{ROLE_INFO[x].label}</option>)}</Select></Field>

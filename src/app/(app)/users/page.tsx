@@ -10,13 +10,14 @@ import { q, rpc, useAction, useRows, useRpc } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { can, GRANTABLE_ROLES, ROLE_INFO, type Role } from "@/lib/roles";
 import { NAV } from "@/lib/nav";
+import { inviteMessage, inviteUser, resendInvite } from "@/lib/invite";
 import { ago, fmtDate } from "@/lib/format";
 
 type Member = { user_id: string; email: string; full_name: string | null; role: Role; status: string; scope: { branch_ids?: string[]; department_ids?: string[] }; custom_role_id: string | null; employee_id: string | null; employee_name: string | null; access_expires_at: string | null; joined_at: string };
 type Invite = { id: string; email: string; role: Role; status: string; created_at: string };
 type CustomRole = { id: string; name: string; description: string | null; base_role: Role; permissions: Record<string, string[]> };
 
-function MemberDialog({ m, onClose, customRoles }: { m: Member | null; onClose: () => void; customRoles: CustomRole[] }) {
+function MemberDialog({ m, onClose, customRoles, onResend }: { m: Member | null; onClose: () => void; customRoles: CustomRole[]; onResend: (email: string) => void }) {
   const { role: myRole } = useMe();
   const { data: emps = [] } = useEmployees(); const { data: branches = [] } = useBranches(); const { data: depts = [] } = useDepartments();
   const [f, setF] = useState<{ role: Role; status: string; branch_ids: string[]; department_ids: string[]; custom: string; employee: string; expires: string } | null>(null);
@@ -46,7 +47,10 @@ function MemberDialog({ m, onClose, customRoles }: { m: Member | null; onClose: 
           </div>
         )}
         <div className="flex justify-between gap-2">
-          {can.tenantAdmin(myRole) ? <Button variant="ghost" className="text-rose-600" onClick={() => remove.mutate()} loading={remove.isPending}><Trash2 className="h-4 w-4" />Remove</Button> : <span />}
+          <div className="flex gap-1">
+            {can.tenantAdmin(myRole) && <Button variant="ghost" className="text-rose-600" onClick={() => remove.mutate()} loading={remove.isPending}><Trash2 className="h-4 w-4" />Remove</Button>}
+            <Button variant="ghost" onClick={() => onResend(m.email)}><Mail className="h-4 w-4" />Email sign-in link</Button>
+          </div>
           <div className="flex gap-2"><Button variant="ghost" onClick={() => { setF(null); onClose(); }}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Save</Button></div>
         </div>
       </div>
@@ -65,7 +69,8 @@ export default function UsersPage() {
   const [sel, setSel] = useState<Member | null>(null);
   const [inv, setInv] = useState(false); const [form, setForm] = useState({ email: "", role: "employee" as Role, employee: "" });
   const [cr, setCr] = useState<Partial<CustomRole> | null>(null);
-  const invite = useAction(() => rpc<string>("invite_user", { p_email: form.email, p_role: form.role, p_employee: form.employee || null }), { success: (r) => r === "added" ? "User added" : "Invitation saved — they join automatically when they sign up with this email", invalidate: ["members"], onDone: () => { setInv(false); setForm({ email: "", role: "employee", employee: "" }); } });
+  const invite = useAction(() => inviteUser(form.email, form.role, form.employee || null, emps.find((e) => e.id === form.employee)?.full_name), { success: inviteMessage, invalidate: ["members"], onDone: () => { setInv(false); setForm({ email: "", role: "employee", employee: "" }); } });
+  const resend = useAction((email: string) => resendInvite(email), { success: inviteMessage });
   const revoke = useAction((id: string) => q((sb) => sb.from("user_invites").update({ status: "revoked" }).eq("id", id)), { success: "Invite revoked", invalidate: ["members"] });
   const saveCr = useAction(() => cr?.id ? q((sb) => sb.from("custom_roles").update({ name: cr.name, description: cr.description, base_role: cr.base_role, permissions: cr.permissions }).eq("id", cr.id!)) : q((sb) => sb.from("custom_roles").insert({ name: cr!.name, description: cr!.description, base_role: cr!.base_role ?? "employee", permissions: cr!.permissions ?? {} })), { success: "Custom role saved", invalidate: ["members"], onDone: () => setCr(null) });
   const delCr = useAction((id: string) => q((sb) => sb.from("custom_roles").delete().eq("id", id)), { invalidate: ["members"] });
@@ -89,7 +94,7 @@ export default function UsersPage() {
         { key: "e", label: "Email", render: (i) => <span className="font-medium">{i.email}</span> },
         { key: "r", label: "Role", render: (i) => ROLE_INFO[i.role].label },
         { key: "d", label: "Invited", render: (i) => ago(i.created_at) },
-        { key: "a", label: "", render: (i) => <div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/signup`); toast.success("Sign-up link copied — share it with the invitee"); }}>Copy link</Button><Button size="sm" variant="ghost" onClick={() => revoke.mutate(i.id)}>Revoke</Button></div> },
+        { key: "a", label: "", render: (i) => <div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/signup`); toast.success("Sign-up link copied — they must use this same email"); }}>Copy sign-up link</Button><Button size="sm" variant="ghost" onClick={() => revoke.mutate(i.id)}>Revoke</Button></div> },
       ]} empty={<EmptyState icon={Mail} title="No pending invites" />} /></Card>}
       {tab === "custom" && (
         <div className="grid gap-4 md:grid-cols-2">
@@ -106,8 +111,8 @@ export default function UsersPage() {
           <Card key={r} className="flex items-start gap-3 p-4"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-600"><UserCog className="h-5 w-5" /></div><div><p className="font-semibold text-ink">{ROLE_INFO[r].label}</p><p className="text-sm text-ink-soft">{ROLE_INFO[r].description}</p></div></Card>
         ))}</div>
       )}
-      <MemberDialog m={sel} onClose={() => setSel(null)} customRoles={customRoles} />
-      <Dialog open={inv} onClose={() => setInv(false)} title="Invite a user" description="If they already have an account they are added immediately; otherwise they join when they sign up with this email.">
+      <MemberDialog m={sel} onClose={() => setSel(null)} customRoles={customRoles} onResend={(e) => resend.mutate(e)} />
+      <Dialog open={inv} onClose={() => setInv(false)} title="Invite a user" description="We email them an invitation link. If they already have an account they are added right away.">
         <div className="space-y-4">
           <Field label="Email"><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
           <Field label="Role" hint={ROLE_INFO[form.role].description}><Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>{GRANTABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_INFO[r].label}</option>)}</Select></Field>

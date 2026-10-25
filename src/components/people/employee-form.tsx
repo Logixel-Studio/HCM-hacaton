@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { Button, Drawer, Field, Input, Select } from "@/components/ui";
 import { useBranches, useDepartments, useEmployees, useGrades, useShifts } from "@/lib/lookups";
 import { rpc, q, useAction } from "@/lib/api";
+import { inviteMessage, inviteUser } from "@/lib/invite";
+import { toast } from "sonner";
 import { useMe } from "@/lib/auth";
 import { can } from "@/lib/roles";
 import { today } from "@/lib/format";
@@ -41,8 +43,12 @@ export function EmployeeForm({ open, onClose, editing }: { open: boolean; onClos
     }
     const payload: Record<string, unknown> = { ...f };
     if (!can.writeCompSalary(role)) delete payload.gross_salary;
-    if (f.invite && f.work_email) payload.invite_email = f.work_email;
-    return rpc<string>("hire_employee", { p: payload });
+    const id = await rpc<string>("hire_employee", { p: payload });
+    if (f.invite && f.work_email) {
+      try { toast.message(inviteMessage(await inviteUser(String(f.work_email), "employee", id, String(f.full_name)))); }
+      catch (e) { toast.error(`Employee added, but the invite failed: ${(e as Error).message}`); }
+    }
+    return id;
   }, { success: editing ? "Employee updated" : "Employee added · onboarding checklist created", invalidate: ["employees", "employee"], onDone: onClose });
 
   const text = (k: string, label: string, type = "text", ph?: string) => <Field label={label}><Input type={type} value={String(f[k] ?? "")} placeholder={ph} onChange={(e) => set(k, e.target.value)} /></Field>;

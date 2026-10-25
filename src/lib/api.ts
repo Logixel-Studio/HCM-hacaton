@@ -12,7 +12,7 @@ export function friendlyError(e: unknown): string {
   if (/duplicate key/i.test(msg)) return "That record already exists.";
   if (/violates foreign key/i.test(msg)) return "This record is linked to other data and cannot be changed that way.";
   if (/violates check constraint/i.test(msg)) return "One of the values is not allowed. Please check the form.";
-  if (/schema cache|Could not find the (function|table)/i.test(msg)) return "Database setup is incomplete. Run supabase/hcm_full_schema.sql in the Supabase SQL editor, then refresh this page.";
+  if (/schema cache|Could not find the (function|table)/i.test(msg)) return `Database setup not found in project "${(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/^https?:\/\//, "").split(".")[0]}". Run supabase/hcm_full_schema.sql in THIS project's SQL editor (check the project ID in .env.local), then run: notify pgrst, 'reload schema';`;
   if (/Failed to fetch|NetworkError/i.test(msg)) return "Cannot reach the server. Check your connection.";
   return msg;
 }
