@@ -108,8 +108,31 @@ export default async function (db) {
   await denied('double clock in', () => as(EMP, `select public.clock_in(31.5, 74.3, 10)`), 'already clocked in');
   await ok('clock out', () => as(EMP, `select public.clock_out(31.5, 74.3) r`), (r) => r[0].r.status);
   await root(`update branches set latitude = 31.5204, longitude = 74.3587, geofence_radius_m = 150`);
-  await denied('geofence blocks a far clock-in', () => as(MGR, `select public.clock_in(31.60, 74.30, 10)`), 'clock in within');
-  await ok('clock in inside geofence', () => as(MGR, `select public.clock_in(31.5205, 74.3588, 8) r`), (r) => r[0].r.distance_m < 150);
+  await ok('geofence blocks a far clock-in', () => as(MGR, `select public.clock_in(31.60, 74.30, 10) r`), (r) => r[0].r.ok === false && /must be within/.test(r[0].r.reason));
+  await ok('clock in inside geofence', () => as(MGR, `select public.clock_in(31.5205, 74.3588, 8) r`), (r) => r[0].r.ok && r[0].r.distance_m < 150);
+  await ok('rejected attempt is logged for HR', () => as(HR, `select count(*) filter (where not ok)::int bad, count(*)::int n from clock_attempts`), (r) => r[0].bad === 1 && r[0].n >= 3);
+
+  console.log('\n5b. Attendance rules, GPS modes and Face ID');
+  const rnd = (seed) => Array.from({ length: 128 }, (_, i) => Math.sin(seed * 1000 + i) * 0.2);
+  const d1 = rnd(1), d2 = rnd(2), d1near = d1.map((v, i) => v + (i % 2 ? 0.01 : -0.01));
+  await denied('employee cannot assign rules', () => as(EMP, `select public.set_attendance_rules(array[$1]::uuid[], 'remote')`, [ids.ahmed]), 'only hr');
+  await ok('HR assigns office + Face ID to payroll officer', () => as(HR, `select public.set_attendance_rules(array[$1]::uuid[], 'office', '{}', null, true) n`, [ids.bilal]), (r) => r[0].n === 1);
+  await ok('employee sees own rules and location', () => as(PAY, `select public.my_attendance_rules() r`), (r) => r[0].r.require_face && !r[0].r.face_enrolled && r[0].r.locations.length === 1);
+  await ok('clock-in asks for enrollment first', () => as(PAY, `select public.clock_in(31.5205, 74.3588, 8) r`), (r) => r[0].r.ok === false && r[0].r.needs_enrollment);
+  await ok('employee enrolls own face', () => as(PAY, `select public.enroll_face($1, $2::float8[], 'x/y.jpg', 3) r`, [ids.bilal, d1]), (r) => r[0].r.ok);
+  await denied('employee cannot re-enroll (anti-swap)', () => as(PAY, `select public.enroll_face($1, $2::float8[])`, [ids.bilal, d2]), 'already set up');
+  await denied('descriptors are not readable', () => as(PAY, `select * from face_enrollments`), 'permission denied');
+  await denied('HR cannot read descriptors either', () => as(HR, `select descriptor from face_enrollments`), 'permission denied');
+  await ok('different face is rejected', () => as(PAY, `select public.clock_in(31.5205, 74.3588, 8, 'web', $1::float8[], 'p.jpg') r`, [d2]), (r) => r[0].r.ok === false && /did not match/.test(r[0].r.reason));
+  await ok('selfie photo required with Face ID', () => as(PAY, `select public.clock_in(31.5205, 74.3588, 8, 'web', $1::float8[], null) r`, [d1near]), (r) => r[0].r.ok === false && /selfie/.test(r[0].r.reason));
+  await ok('matching face inside geofence clocks in', () => as(PAY, `select public.clock_in(31.5205, 74.3588, 8, 'mobile', $1::float8[], 't/e/in.jpg') r`, [d1near]), (r) => r[0].r.ok && r[0].r.face_score < 0.5);
+  await ok('punch stores face score, photo and branch', () => as(HR, `select clock_in_face_score, clock_in_photo_path, clock_in_branch_id, work_mode, flags from attendance_records where employee_id = $1`, [ids.bilal]),
+    (r) => r[0].clock_in_photo_path === 't/e/in.jpg' && r[0].clock_in_branch_id && r[0].work_mode === 'office' && r[0].flags.includes('face_verified'));
+  await ok('weak GPS is rejected in office mode', async () => { await as(HR, `select public.set_attendance_rules(array[$1]::uuid[], 'office')`, [ids.usman]); return as(MGR, `select public.clock_out(31.5205, 74.3588, 900) r`); }, (r) => r[0].r.ok === true);
+  await ok('field mode: anywhere with GPS', async () => { await as(HR, `select public.set_attendance_rules(array[$1]::uuid[], 'field')`, [ids.fatima]); return as(FIN, `select public.clock_in(24.8607, 67.0011, 20) r`); }, (r) => r[0].r.ok && r[0].r.mode === 'field');
+  await ok('remote mode: no GPS needed', async () => { await as(HR, `select public.set_attendance_rules(array[$1]::uuid[], 'remote')`, [ids.sara]); return as(HR, `select public.clock_in() r`); }, (r) => r[0].r.ok && r[0].r.mode === 'remote');
+  await ok('face status visible to HR', () => as(HR, `select count(*)::int n from public.face_status()`), (r) => r[0].n === 1);
+  await ok('HR resets Face ID', async () => { await as(HR, `select public.reset_face($1)`, [ids.bilal]); return as(HR, `select count(*)::int n from public.face_status()`); }, (r) => r[0].n === 0);
   ids.reg = (await ok('regularization request', () => as(EMP, `insert into regularization_requests (employee_id, work_date, clock_in_time, clock_out_time, reason) values ($1, current_date - 3, '09:05', '18:10', 'Forgot to punch') returning id`, [ids.ahmed])))?.[0]?.id;
   await ok('manager approves correction', () => as(MGR, `select public.decide_regularization($1, true)`, [ids.reg]));
   await ok('attendance row created and flagged', () => as(EMP, `select flags, worked_minutes from attendance_records where work_date = current_date - 3`), (r) => r[0].flags.includes('corrected') && r[0].worked_minutes === 545);

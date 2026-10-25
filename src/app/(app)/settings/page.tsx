@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button, Card, Field, Input, Select, Tabs } from "@/components/ui";
 import { PageHeader, SectionCard } from "@/components/common";
 import { CrudTable } from "@/components/crud";
+import { BranchesTable } from "@/components/branches-table";
 import { AccentPicker, ThemeToggle } from "@/components/theme-controls";
 import { RequireAccess } from "@/components/guard";
 import { useBranches, useDepartments, useEmployees } from "@/lib/lookups";
@@ -42,17 +43,7 @@ function Organization({ edit }: { edit: boolean }) {
   const empOpts = emps.filter((e) => e.status !== "exited").map((e) => ({ value: e.id, label: e.full_name }));
   return (
     <div className="space-y-4">
-      <CrudTable table="branches" title="Branches & geofences" order="name" canEdit={edit} emptyText="Add each office, factory or store. Set coordinates to enable geofenced clock-in."
-        fields={[{ key: "name", label: "Name", required: true }, { key: "code", label: "Code" }, { key: "city", label: "City" }, { key: "address", label: "Address", list: false, full: true },
-          { key: "latitude", label: "Latitude", type: "number", list: false }, { key: "longitude", label: "Longitude", type: "number", list: false },
-          { key: "geofence_radius_m", label: "Geofence radius (m)", type: "number", default: 150, render: (v, r) => r.latitude ? `${v} m` : "Off" },
-          { key: "legal_entity_id", label: "Legal entity", type: "select", options: entities.map((x) => ({ value: x.id, label: x.name })), list: false },
-          { key: "is_active", label: "Active", type: "checkbox", default: true }]}
-        extra={(row, set) => (
-          <Button variant="outline" size="sm" className="mt-3" onClick={() => navigator.geolocation?.getCurrentPosition((p) => { set({ ...row, latitude: p.coords.latitude.toFixed(6), longitude: p.coords.longitude.toFixed(6) }); toast.success("Location captured"); }, () => toast.error("Location permission denied"), { enableHighAccuracy: true })}>
-            <LocateFixed className="h-4 w-4" />Use my current location
-          </Button>
-        )} />
+      <BranchesTable canEdit={edit} />
       <CrudTable table="departments" title="Departments" order="name" canEdit={edit}
         fields={[{ key: "name", label: "Name", required: true }, { key: "code", label: "Code" }, { key: "parent_id", label: "Parent", type: "select", options: depts.map((d) => ({ value: d.id, label: d.name })) },
           { key: "head_employee_id", label: "Head", type: "select", options: empOpts }, { key: "cost_center_id", label: "Cost centre", type: "select", options: ccs.map((c) => ({ value: c.id, label: `${c.code} · ${c.name}` })), list: false }]} />

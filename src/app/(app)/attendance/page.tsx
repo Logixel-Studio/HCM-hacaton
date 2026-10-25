@@ -6,13 +6,15 @@ import { Avatar, Button, Card, Dialog, Field, Input, Select, Tabs, Textarea } fr
 import { DataTable, EmptyState, Loading, PageHeader, SearchInput, SectionCard, StatusBadge } from "@/components/common";
 import { ClockCard, type ShiftInfo, type TodayRecord } from "@/components/clock-card";
 import { byId, useDepartments, useEmployees, useShifts, type EmployeeLite } from "@/lib/lookups";
-import { downloadText, q, toCsv, useAction, useRows, useRpc } from "@/lib/api";
+import { downloadText, openFile, q, toCsv, useAction, useRows, useRpc } from "@/lib/api";
+import { AttendanceRules } from "@/components/attendance-rules";
+import { Badge } from "@/components/ui";
 import { useMe } from "@/lib/auth";
 import { can } from "@/lib/roles";
 import { addDays, fmtDate, fmtShort, fmtTime, minutes, toISODate, today, title, DOW } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-type Rec = { id: string; employee_id: string; work_date: string; clock_in_at: string | null; clock_out_at: string | null; status: string; late_minutes: number; worked_minutes: number; overtime_minutes: number; flags: string[]; source: string; clock_in_distance_m: number | null };
+type Rec = { id: string; employee_id: string; work_date: string; clock_in_at: string | null; clock_out_at: string | null; status: string; late_minutes: number; worked_minutes: number; overtime_minutes: number; flags: string[]; source: string; clock_in_distance_m: number | null; clock_in_photo_path: string | null; clock_in_face_score: number | null; work_mode: string | null; clock_out_distance_m: number | null };
 
 const STATUS_BG: Record<string, string> = { present: "bg-emerald-500", late: "bg-amber-500", half_day: "bg-amber-400", absent: "bg-rose-500", on_leave: "bg-violet-500", holiday: "bg-sky-500", missing_punch: "bg-orange-500" };
 
@@ -160,6 +162,12 @@ function Board({ scope }: { scope: "team" | "all" }) {
             { key: "i", label: "In", render: (x) => fmtTime(x.r?.clock_in_at) },
             { key: "o", label: "Out", render: (x) => fmtTime(x.r?.clock_out_at) },
             { key: "w", label: "Worked", render: (x) => x.r ? minutes(x.r.worked_minutes) : "—" },
+            { key: "v", label: "Verification", hideOnMobile: true, render: (x) => x.r?.clock_in_at ? (
+              <span className="flex flex-wrap items-center gap-1 text-xs">
+                <Badge tone={x.r.flags?.includes("outside_geofence") || x.r.flags?.includes("no_geofence") ? "amber" : "neutral"}>{x.r.work_mode === "field" ? "Field" : x.r.work_mode === "remote" ? "Remote" : x.r.clock_in_distance_m != null ? `${x.r.clock_in_distance_m} m` : x.r.source}</Badge>
+                {x.r.clock_in_face_score != null && <Badge tone="green">Face {Math.round((1 - Number(x.r.clock_in_face_score)) * 100)}%</Badge>}
+                {x.r.clock_in_photo_path && <button className="cursor-pointer font-medium text-brand-600" onClick={() => openFile("attendance-selfies", x.r!.clock_in_photo_path!)}>Selfie</button>}
+              </span>) : null },
             { key: "s", label: "Status", render: (x) => x.leave ? <StatusBadge status="on_leave" /> : x.r ? <span className="flex items-center gap-1.5"><StatusBadge status={x.r.status} />{x.r.flags?.includes("corrected") && <span className="text-[11px] text-ink-soft">corrected</span>}</span> : <StatusBadge status="absent" label="Not in" /> },
             ...(can.hrStaff(role) ? [{ key: "a", label: "", render: (x: (typeof rows)[number]) => !x.r?.clock_in_at && !x.leave ? (
               <Select className="h-8 w-32 text-xs" value="" onChange={(e) => e.target.value && mark.mutate({ emp: x.e.id, status: e.target.value })}><option value="">Mark…</option><option value="absent">Absent</option><option value="present">Present</option><option value="half_day">Half day</option></Select>
@@ -227,6 +235,27 @@ function Roster() {
   );
 }
 
+function Attempts() {
+  const { data: emps = [] } = useEmployees(); const E = byId(emps);
+  const [only, setOnly] = useState("failed");
+  const { data: rows = [] } = useRows<{ id: number; employee_id: string; kind: string; ok: boolean; reason: string | null; distance_m: number | null; accuracy_m: number | null; face_score: number | null; photo_path: string | null; created_at: string; latitude: number | null; longitude: number | null }[]>(
+    ["attendance", "attempts", only], (sb) => { let x = sb.from("clock_attempts").select("*").order("created_at", { ascending: false }).limit(300); if (only === "failed") x = x.eq("ok", false); return x; });
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between gap-2"><Tabs value={only} onChange={setOnly} tabs={[{ value: "failed", label: "Rejected" }, { value: "all", label: "All attempts" }]} /><span className="text-xs text-ink-soft">Every punch attempt is logged, including rejected ones.</span></div>
+      <DataTable rows={rows} rowKey={(r) => String(r.id)} columns={[
+        { key: "t", label: "When", render: (r) => <span className="whitespace-nowrap text-ink-soft">{fmtShort(r.created_at)} {fmtTime(r.created_at)}</span> },
+        { key: "e", label: "Employee", render: (r) => E.get(r.employee_id)?.full_name },
+        { key: "k", label: "Punch", render: (r) => <Badge tone={r.ok ? "green" : "rose"}>{r.kind === "in" ? "Clock in" : "Clock out"} · {r.ok ? "accepted" : "rejected"}</Badge> },
+        { key: "r", label: "Reason", render: (r) => <span className="text-xs text-ink-soft">{r.reason ?? "—"}</span> },
+        { key: "d", label: "Location", hideOnMobile: true, render: (r) => r.latitude != null ? <a className="text-xs text-brand-600" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${r.latitude},${r.longitude}`}>{r.distance_m != null ? `${r.distance_m} m` : "Map"} · ±{Math.round(r.accuracy_m ?? 0)} m ↗</a> : "—" },
+        { key: "f", label: "Face", render: (r) => r.face_score != null ? <span className="text-xs">{Math.round((1 - Number(r.face_score)) * 100)}%</span> : "—" },
+        { key: "p", label: "", render: (r) => r.photo_path ? <button className="cursor-pointer text-xs font-medium text-brand-600" onClick={() => openFile("attendance-selfies", r.photo_path!)}>Selfie</button> : null },
+      ]} empty={<EmptyState icon={Clock} title={only === "failed" ? "No rejected attempts" : "No attempts yet"} />} />
+    </Card>
+  );
+}
+
 export default function AttendancePage() {
   const { employeeId, role, ctx } = useMe();
   const params = useSearchParams();
@@ -234,17 +263,19 @@ export default function AttendancePage() {
   const tabs = [
     ...(employeeId ? [{ value: "me", label: "My attendance" }] : []),
     ...(hasTeam ? [{ value: "team", label: "My team" }] : []),
-    ...(can.hrStaff(role) ? [{ value: "all", label: "Attendance board" }, { value: "roster", label: "Shift roster" }] : []),
+    ...(can.hrStaff(role) ? [{ value: "all", label: "Attendance board" }, { value: "rules", label: "GPS & Face ID rules" }, { value: "attempts", label: "Punch log" }, { value: "roster", label: "Shift roster" }] : []),
   ];
   const [tab, setTab] = useState(params.get("view") && tabs.some((t) => t.value === params.get("view")) ? params.get("view")! : tabs[0]?.value ?? "me");
   return (
     <div>
-      <PageHeader icon={Clock} title="Time & attendance" subtitle="Server-stamped clock-ins with office geofencing, corrections and shift rosters." />
+      <PageHeader icon={Clock} title="Time & attendance" subtitle="Server-checked clock-ins with GPS geofence, selfie and Face ID, corrections and shift rosters." />
       {tabs.length > 1 && <Tabs className="mb-4" value={tab} onChange={setTab} tabs={tabs} />}
       {tab === "me" && employeeId && <MyAttendance employeeId={employeeId} />}
       {tab === "team" && <Board scope="team" />}
       {tab === "all" && <Board scope="all" />}
       {tab === "roster" && <Roster />}
+      {tab === "rules" && <AttendanceRules />}
+      {tab === "attempts" && <Attempts />}
     </div>
   );
 }

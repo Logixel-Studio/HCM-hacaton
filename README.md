@@ -38,7 +38,9 @@ These match the brief's modules (M0 to M15):
 - **Onboarding and offboarding:** checklists with a task owner (HR, IT, Admin, Manager, Finance, Employee, Buddy), resignation, exit interview, and a final settlement covering salary, leave encashment, gratuity and loan recovery, approved by HR then Finance.
 - **Time and attendance:**
   - Server-stamped clock-in and clock-out.
-  - Office geofence (haversine distance check), shifts, night shifts, weekly rosters and holidays.
+  - GPS rules per employee, assigned by HR in bulk: Office (must be inside one of the allowed branches' geofence), Field (GPS recorded anywhere) or Remote.
+  - Face ID with the live camera (see "Face ID" below), selfie proof, and a punch log of every accepted and rejected attempt.
+  - Shifts, night shifts, weekly rosters and holidays.
   - Corrections and overtime requests with approval.
   - An attendance board with CSV export.
 - **Leave:** policy-as-data leave types, monthly or annual accrual, proration, sandwich rule, documents, half days, manager to HR routing, leave calendar and balance adjustments.
@@ -70,7 +72,7 @@ These match the brief's modules (M0 to M15):
 
 1. Create a Supabase project, or use your existing empty one.
 
-2. Open SQL Editor and run `supabase/hcm_full_schema.sql` once. It contains migrations 0001 to 0012 in order, and it is safe to run again. If you prefer the CLI, run `supabase link` and then `supabase db push`, which uses the `supabase/migrations` folder.
+2. Open SQL Editor and run `supabase/hcm_full_schema.sql` once. It contains migrations 0001 to 0013 in order, and it is safe to run again. If you prefer the CLI, run `supabase link` and then `supabase db push`, which uses the `supabase/migrations` folder.
 
    If the project already has a `profiles` table, for example from Supabase's starter template, it is upgraded automatically.
 
@@ -91,6 +93,7 @@ These match the brief's modules (M0 to M15):
    - `receipts` (private)
    - `cvs` (private, public upload only into open jobs)
    - `avatars` (public)
+   - `attendance-selfies` (private, created by migration 0013)
 
 6. Invitation emails (needed so invited employees get an email):
    ```
@@ -144,7 +147,19 @@ To deploy, push to Vercel (or any Node host) and set the same two environment va
 
 3. Invited people sign up with the same email and join your company automatically, with the role you chose.
 
-4. Set office coordinates in Settings → Organization → Branches to switch on geofenced clock-in.
+4. Set office coordinates in Settings → Organization → Branches (or Attendance → GPS & Face ID rules), using "Use my current location" while standing in the office.
+
+5. In Attendance → GPS & Face ID rules, choose company defaults (turn on "Require Face ID" for everyone, or per employee with "Assign rule").
+
+
+## Face ID
+
+- Library: `@vladmandic/face-api` (TensorFlow.js, MIT). `npm install` copies the three models it needs into `public/models` (about 12 MB, cached by the browser after the first use).
+- When Face ID is required and the person has no face registered, they are taken to `/face-setup` straight after accepting their invite (or signing up / first login). They cannot use the app until it is done. If the company turns off self-enrollment, HR registers the face from the rules screen instead.
+- Setup: look straight (5 samples), turn the head to both sides, blink, then confirm the photo. Clock in or out: look straight, turn once, blink — about 5 seconds.
+- The browser only sends a 128-number face descriptor and a selfie. Matching is done in Postgres (`check_punch`), with a strictness that HR sets (0.45 strict, 0.50 normal, 0.55 relaxed). The stored descriptor cannot be read by any user, not even HR.
+- Camera and GPS only work on `https://` (or localhost). On phones use Chrome or Safari.
+- Limits, said plainly: the head-turn and blink checks stop a printed photo or a still picture on a screen, but they are not certified anti-spoofing; a good video of the person could pass. Every punch keeps a selfie and is logged, so HR can review. Identical twins can match each other.
 
 
 ## 5. How access is enforced
@@ -160,12 +175,12 @@ To deploy, push to Vercel (or any Node host) and set the same two environment va
 
 ## 6. Tests
 
-`npm run test:db` runs all migrations on an in-memory Postgres (PGlite) with Supabase stand-ins. It then plays a full company scenario as real signed-in users under RLS. That is 131 checks, covering:
+`npm run test:db` runs all migrations on an in-memory Postgres (PGlite) with Supabase stand-ins. It then plays a full company scenario as real signed-in users under RLS. That is 149 checks, covering:
 
 - sign-up and invites
 - privacy rules
 - leave
-- geofence
+- geofence, GPS rules and Face ID matching
 - payroll maker-checker with the worked example (135,000 gross with PF and an 8,000 loan gives a net of 116,424 and tax of 3,459)
 - expenses
 - recruitment to hire
@@ -182,7 +197,7 @@ The brief lists some items that depend on third parties. They are not built here
 
 - native mobile apps (the web app is responsive and can be installed as a PWA later)
 - WhatsApp bot
-- biometric device sync and face recognition
+- biometric device (ZKTeco etc.) sync; certified anti-spoof liveness
 - FBR/EOBI e-filing APIs
 - bank API transfers (a bank CSV is generated instead)
 - Slack and Teams apps
