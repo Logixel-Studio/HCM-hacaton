@@ -1,0 +1,5 @@
+# Minimal Supabase CLI config so `supabase db push` and `supabase functions deploy` work.
+project_id = "hcm-master-suite"
+
+[functions.copilot]
+verify_jwt = true
