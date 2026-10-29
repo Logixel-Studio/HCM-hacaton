@@ -30,8 +30,9 @@ export const NAV: NavItem[] = [
   { href: "/analytics", label: "Analytics", icon: BarChart3, group: "admin", show: (c) => can.analytics(c.role) },
   { href: "/users", label: "Users & roles", icon: ShieldCheck, group: "admin", show: (c) => can.hrLead(c.role) || can.auditor(c.role) },
   { href: "/audit", label: "Audit log", icon: ScrollText, group: "admin", show: (c) => can.tenantAdmin(c.role) || can.auditor(c.role) || c.role === "hr_director" },
-  { href: "/settings", label: "Settings", icon: Settings, group: "admin", show: (c) => can.hrStaff(c.role) || can.viewPay(c.role) || can.finance(c.role) },
-  { href: "/platform", label: "Platform", icon: Building2, group: "admin", show: (c) => c.isPlatformAdmin },
+  { href: "/settings", label: "Company settings", icon: Building2, group: "admin", show: (c) => can.hrStaff(c.role) || can.viewPay(c.role) || can.finance(c.role) },
+  { href: "/account", label: "My settings", icon: Settings, group: "admin", show: any },
+  { href: "/platform", label: "Platform", icon: ShieldCheck, group: "admin", show: (c) => c.isPlatformAdmin },
 ];
 
 export const GROUP_LABEL = { work: "Workspace", talent: "Talent", people: "Employee experience", admin: "Administration" } as const;

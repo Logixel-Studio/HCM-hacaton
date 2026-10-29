@@ -416,4 +416,62 @@ create policy hcm_selfies_read on storage.objects for select to authenticated
          and ((storage.foldername(name))[2] = public.current_employee_id()::text or public.is_hr_staff() or public.is_auditor()
               or public.is_my_report(nullif((storage.foldername(name))[2], '')::uuid)));
 
+-- ── Auto-link sign-in accounts to employee records by email ───────────────
+-- A user invited from "Users & roles" without an employee gets linked as soon as HR adds an
+-- employee with the same work email (and the other way round), so attendance and Face ID apply.
+create or replace function public.link_member_by_email(p_tenant uuid, p_employee uuid, p_email text) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_user uuid;
+begin
+  if p_email is null then return; end if;
+  select m.user_id into v_user from memberships m join auth.users u on u.id = m.user_id
+  where m.tenant_id = p_tenant and m.employee_id is null and lower(u.email) = lower(trim(p_email))
+    and not exists (select 1 from employees e where e.tenant_id = p_tenant and e.user_id = m.user_id)
+  limit 1;
+  if v_user is null then return; end if;
+  update memberships set employee_id = p_employee where tenant_id = p_tenant and user_id = v_user and employee_id is null;
+  update employees set user_id = v_user where id = p_employee and user_id is null;
+end $$;
+
+create or replace function public.employees_autolink() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.user_id is null and new.work_email is not null then
+    perform public.link_member_by_email(new.tenant_id, new.id, new.work_email);
+  end if;
+  return null;
+end $$;
+drop trigger if exists employees_autolink on public.employees;
+create trigger employees_autolink after insert or update of work_email on public.employees
+  for each row execute function public.employees_autolink();
+
+create or replace function public.memberships_autolink() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_emp uuid;
+begin
+  if new.employee_id is null then
+    select e.id into v_emp from employees e join auth.users u on lower(u.email) = lower(e.work_email)
+    where u.id = new.user_id and e.tenant_id = new.tenant_id and e.user_id is null limit 1;
+    if v_emp is not null then
+      update memberships set employee_id = v_emp where id = new.id;
+      update employees set user_id = new.user_id where id = v_emp;
+    end if;
+  end if;
+  return null;
+end $$;
+drop trigger if exists memberships_autolink on public.memberships;
+create trigger memberships_autolink after insert on public.memberships
+  for each row execute function public.memberships_autolink();
+
+revoke execute on function public.link_member_by_email(uuid, uuid, text) from public, anon, authenticated;
+revoke execute on function public.employees_autolink() from public, anon, authenticated;
+revoke execute on function public.memberships_autolink() from public, anon, authenticated;
+
+-- Link existing ones once (for companies that invited users before adding their employee records).
+do $$ declare r record; begin
+  for r in select id, tenant_id, work_email from employees where user_id is null and work_email is not null loop
+    perform public.link_member_by_email(r.tenant_id, r.id, r.work_email);
+  end loop;
+end $$;
+
 notify pgrst, 'reload schema';

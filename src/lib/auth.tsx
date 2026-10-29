@@ -12,6 +12,7 @@ export type AppContext = {
   email: string;
   full_name: string | null;
   avatar_url: string | null;
+  prefs?: Record<string, unknown>;
   is_platform_admin: boolean;
   tenant: { id: string; name: string; slug: string; plan: string; status: string; currency: string; timezone: string; logo_url: string | null; brand_color: string | null; seat_limit: number; trial_ends_at: string | null } | null;
   role: Role | null;

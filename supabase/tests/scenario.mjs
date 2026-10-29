@@ -251,6 +251,37 @@ export default async function (db) {
   }, (r) => r[0].v.valid === true);
   await ok('audit trail records payroll actions', () => as(AUD, `select count(*)::int n from audit_log where action like 'payroll_%'`), (r) => r[0].n >= 3);
 
+  console.log('\n12. Auto-link accounts to employees by email');
+  await ok('invite a user without an employee record', () => as(OWNER, `select public.invite_user('saad@acme.pk', 'employee')`));
+  await signUp(21, 'saad@acme.pk', 'Saad');
+  await ok('signed-up user starts unlinked', () => as(OWNER, `select employee_id from memberships where user_id = $1`, [uid(21)]), (r) => r[0].employee_id === null);
+  const saadEmp = (await ok('HR adds employee with the same email', () => as(OWNER, `select public.hire_employee($1::jsonb) id`, [{ full_name: 'Saad Amir', work_email: 'Saad@acme.pk', job_title: 'Clerk', gross_salary: 60000, joining_date: '2026-10-01' }])))?.[0]?.id;
+  await ok('account is linked automatically', () => as(uid(21), `select public.my_context() c`), (r) => r[0].c.employee?.id === saadEmp);
+  await ok('linked user gets attendance rules', () => as(uid(21), `select public.my_attendance_rules() r`), (r) => r[0].r && r[0].r.mode);
+
+  console.log('\n13. Preferences, notification muting, AI chat privacy, export');
+  const SAAD = uid(21);
+  await ok('set a nested preference', () => as(SAAD, `select public.set_my_pref('notif.leave', 'false'::jsonb) p`), (r) => r[0].p.notif.leave === false);
+  await ok('set a top-level preference', () => as(SAAD, `select public.set_my_pref('textSize', '"large"'::jsonb) p`), (r) => r[0].p.textSize === 'large' && r[0].p.notif.leave === false);
+  await denied('bad preference key rejected', () => as(SAAD, `select public.set_my_pref('a;drop', 'true'::jsonb)`), 'Invalid preference key');
+  await ok('prefs come back in my_context', () => as(SAAD, `select public.my_context() c`), (r) => r[0].c.prefs.textSize === 'large');
+  await ok('muted category is not delivered', async () => {
+    await root(`select set_config('request.jwt.claim.sub', $1, false)`, [OWNER]);
+    await as(OWNER, `select 1`);
+    return root(`select public.notify_user($1, 'Leave approved', null, '/leave'), public.notify_user($1, 'Payslip ready', null, '/payslips'), public.notify_user($1, 'Approve this', null, '/approvals')`, [SAAD]);
+  });
+  await ok('only unmuted notifications arrive', () => as(SAAD, `select title from notifications where title in ('Leave approved','Payslip ready','Approve this')`),
+    (r) => r.length === 2 && !r.some((x) => x.title === 'Leave approved'));
+  await ok('clear a preference group', () => as(SAAD, `select public.clear_my_pref('notif') p`), (r) => r[0].p.notif === undefined);
+  const conv = (await ok('start an AI chat', () => as(SAAD, `insert into ai_conversations (title) values ('Leave question') returning id`)))?.[0]?.id;
+  await ok('add chat messages', () => as(SAAD, `insert into ai_messages (conversation_id, role, content) values ($1, 'user', 'How much leave?'), ($1, 'assistant', 'You have 10 days.') returning id`, [conv]), (r) => r.length === 2);
+  await ok('owner cannot read another person\'s AI chats', () => as(OWNER, `select count(*)::int n from ai_messages`), (r) => r[0].n === 0);
+  await denied('cannot post into someone else\'s chat', () => as(MGR, `insert into ai_messages (conversation_id, role, content) values ($1, 'user', 'hi')`, [conv]));
+  await ok('like an answer', () => as(SAAD, `update ai_messages set feedback = 1 where conversation_id = $1 and role = 'assistant' returning feedback`, [conv]), (r) => r[0]?.feedback === 1);
+  await ok('export my data', () => as(SAAD, `select public.my_data_export() d`), (r) => r[0].d.employee.full_name === 'Saad Amir' && r[0].d.ai_chats.length === 1 && Array.isArray(r[0].d.leave_requests));
+  await ok('my activity lists my own changes', () => as(OWNER, `select count(*)::int n from public.my_activity(50)`), (r) => r[0].n >= 1);
+  await denied('email codes are server-only', () => as(SAAD, `select * from email_codes`));
+
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 }

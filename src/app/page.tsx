@@ -1,20 +1,15 @@
 "use client";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth";
-import { isConfigured } from "@/lib/supabase";
-import { Loading } from "@/components/common";
-import { SetupNotice } from "@/components/setup-notice";
+import { Landing } from "@/components/landing/landing";
 
+/** Public product website. Signed-in visitors see an "Open dashboard" button instead of sign-up. */
 export default function Home() {
-  const { session, ctx, loading } = useAuth();
   const router = useRouter();
+  // Invite or password-recovery links that land on the home page go straight to "Set your password".
   useEffect(() => {
-    if (!isConfigured || loading) return;
-    if (!session) router.replace("/login");
-    else if (ctx?.tenant || ctx?.is_platform_admin) router.replace("/dashboard");
-    else router.replace("/onboarding");
-  }, [session, ctx, loading, router]);
-  if (!isConfigured) return <SetupNotice />;
-  return <Loading className="h-screen" />;
+    const h = window.location.hash;
+    if (/type=(recovery|invite)/.test(h)) router.replace(`/reset-password${/type=invite/.test(h) ? "?invited=1" : ""}${h}`);
+  }, [router]);
+  return <Landing />;
 }

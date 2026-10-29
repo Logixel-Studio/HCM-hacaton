@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { KeyRound, Mail, Plus, ShieldCheck, Trash2, UserCog } from "lucide-react";
+import { AlertTriangle, KeyRound, Mail, Plus, ShieldCheck, Trash2, UserCog } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, Badge, Button, Card, Dialog, Field, Input, Select, Tabs, Textarea } from "@/components/ui";
 import { DataTable, EmptyState, PageHeader, ReadOnlyNote, StatusBadge } from "@/components/common";
@@ -83,10 +83,16 @@ export default function UsersPage() {
       </PageHeader>
       {readOnly && <ReadOnlyNote />}
       <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: "members", label: "Members", count: members.length }, ...(!readOnly ? [{ value: "invites", label: "Pending invites", count: invites.length }] : []), { value: "custom", label: "Custom roles" }, { value: "matrix", label: "Role guide" }]} />
+      {tab === "members" && !readOnly && members.some((m) => !m.employee_id && !["auditor", "recruiter"].includes(m.role)) && (
+        <div className="mb-4 flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p><b>{members.filter((m) => !m.employee_id && !["auditor", "recruiter"].includes(m.role)).length} users are not linked to an employee record.</b> They cannot clock in, use GPS / Face ID, apply leave or get payslips. Add them in People with the <b>same work email</b> (they link automatically), or click the user and choose "Linked employee".</p>
+        </div>
+      )}
       {tab === "members" && <Card className="p-4"><DataTable rows={members} rowKey={(m) => m.user_id} onRowClick={readOnly ? undefined : setSel} columns={[
         { key: "u", label: "User", render: (m) => <span className="flex items-center gap-3"><Avatar name={m.full_name ?? m.email} size="sm" /><span><span className="block font-medium">{m.full_name ?? "—"}</span><span className="block text-xs text-ink-soft">{m.email}</span></span></span> },
         { key: "r", label: "Role", render: (m) => <span className="flex flex-wrap items-center gap-1"><Badge tone="brand">{ROLE_INFO[m.role].label}</Badge>{m.custom_role_id && <Badge tone="violet">{customRoles.find((c) => c.id === m.custom_role_id)?.name}</Badge>}{(m.scope?.branch_ids?.length || m.scope?.department_ids?.length) ? <Badge>Scoped</Badge> : null}</span> },
-        { key: "e", label: "Employee", render: (m) => m.employee_name ?? <span className="text-ink-soft">Not linked</span>, hideOnMobile: true },
+        { key: "e", label: "Employee", render: (m) => m.employee_name ?? <span className="font-medium text-amber-600">Not linked · fix</span>, hideOnMobile: true },
         { key: "s", label: "Status", render: (m) => <span className="flex flex-col items-start"><StatusBadge status={m.status} />{m.access_expires_at && <span className="text-[11px] text-ink-soft">until {fmtDate(m.access_expires_at)}</span>}</span> },
         { key: "j", label: "Joined", render: (m) => ago(m.joined_at), hideOnMobile: true },
       ]} /></Card>}

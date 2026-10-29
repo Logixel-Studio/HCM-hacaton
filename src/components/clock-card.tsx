@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/common";
 import { FaceCapture, type FaceResult } from "@/components/face-capture";
 import { rpc, uploadFile, useRpc } from "@/lib/api";
 import { useAuth, useMe } from "@/lib/auth";
-import { getPosition, metres } from "@/lib/face";
+import { getPosition, metres, preloadFaceApi } from "@/lib/face";
 import { fmtTime, minutes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -61,6 +61,7 @@ export function ClockCard({ today, shift }: { today: TodayRecord; shift: ShiftIn
   const mode = rules?.mode ?? "office";
   const needsGps = mode !== "remote";
   const needsCamera = !!(rules?.require_face || rules?.require_selfie);
+  useEffect(() => { if (rules?.require_face) preloadFaceApi(); }, [rules?.require_face]);
   const located = (rules?.locations ?? []).filter((l) => l.latitude != null && l.longitude != null);
   const nearest = here && located.length
     ? located.map((l) => ({ ...l, d: Math.round(metres(here.lat, here.lng, l.latitude!, l.longitude!)) })).sort((a, b) => a.d - b.d)[0]
@@ -124,7 +125,7 @@ export function ClockCard({ today, shift }: { today: TodayRecord; shift: ShiftIn
   const ModeIcon = mode === "remote" ? Home : mode === "field" ? Navigation : MapPin;
 
   return (
-    <Card className="relative overflow-hidden p-6">
+    <Card className="relative overflow-hidden p-6" data-tour="clock-card">
       <div className="brand-gradient pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full opacity-10" />
       <div className="flex items-start justify-between">
         <div>

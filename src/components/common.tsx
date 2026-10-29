@@ -8,14 +8,14 @@ import { title as titleCase } from "@/lib/format";
 export function PageHeader({ title, subtitle, children, icon: Icon }: { title: React.ReactNode; subtitle?: React.ReactNode; children?: React.ReactNode; icon?: LucideIcon }) {
   return (
     <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" data-tour="page-header">
         {Icon && <div className="brand-gradient hidden h-12 w-12 items-center justify-center rounded-2xl text-white shadow-sm sm:flex"><Icon className="h-6 w-6" /></div>}
         <div>
           <h1 className="font-display text-2xl font-bold text-ink sm:text-[28px]">{title}</h1>
           {subtitle && <p className="mt-0.5 text-sm text-ink-soft">{subtitle}</p>}
         </div>
       </div>
-      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
+      {children && <div className="flex flex-wrap items-center gap-2" data-tour="page-actions">{children}</div>}
     </div>
   );
 }
@@ -105,7 +105,7 @@ export function DataTable<T extends object>({ rows, columns, onRowClick, empty, 
   if (!rows.length) return <>{empty ?? <EmptyState title="Nothing here yet" />}</>;
   return (
     <>
-      <div className="hidden overflow-x-auto md:block">
+      <div className="hidden overflow-x-auto md:block" data-tour="table">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs font-medium uppercase tracking-wide text-ink-soft">

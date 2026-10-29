@@ -1,68 +1,124 @@
 "use client";
 // Face detection + recognition in the browser with @vladmandic/face-api (TensorFlow.js).
-// Models are served from /public/models (copied from the npm package on install), so no
-// image ever leaves the device except the selfie the company stores for audit.
-// The browser only produces a 128-number face descriptor; matching against the enrolled
-// descriptor happens in Postgres (check_punch), so it cannot be faked by editing the page.
+// It runs in a Web Worker (src/workers/face.worker.ts) so the page never freezes while the GPU works;
+// browsers without worker WebGL fall back to the main thread. Models are served from /public/models.
+// The browser only produces a 128-number face descriptor; matching against the enrolled descriptor
+// happens in Postgres (check_punch), so it cannot be faked by editing the page.
+import { frameFromLandmarks, type FaceFrame } from "./face-math";
+export type { FaceFrame } from "./face-math";
 
 type FaceApi = typeof import("@vladmandic/face-api");
-let api: FaceApi | null = null;
-let loading: Promise<FaceApi> | null = null;
+type Engine = { detect: (video: HTMLVideoElement, withDescriptor: boolean) => Promise<FaceFrame | null | "many"> };
 
-export async function loadFaceApi(): Promise<FaceApi> {
-  if (api) return api;
-  if (!loading) {
-    loading = (async () => {
-      const faceapi = await import("@vladmandic/face-api");
-      const tf = faceapi.tf as unknown as { setBackend: (b: string) => Promise<boolean>; ready: () => Promise<void> };
-      await tf.setBackend("webgl").catch(() => tf.setBackend("cpu"));
-      await tf.ready();
-      await Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
-        faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
-        faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
-      ]);
-      api = faceapi;
-      return faceapi;
-    })().catch((e) => { loading = null; throw e; });
-  }
-  return loading;
+let engine: Engine | null = null;
+let starting: Promise<Engine> | null = null;
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+const FRAME_W = 400; // frames are scaled to this width before detection (fast, still accurate)
+
+// ── Worker engine (default) ────────────────────────────────────────────────
+function startWorker(): Promise<Engine> {
+  return new Promise((resolve, reject) => {
+    let w: Worker;
+    try { w = new Worker(new URL("../workers/face.worker.ts", import.meta.url), { type: "module" }); }
+    catch (e) { reject(e); return; }
+    let seq = 0;
+    const pending = new Map<number, { ok: (v: FaceFrame | null | "many") => void; fail: (e: Error) => void }>();
+    const timer = setTimeout(() => { w.terminate(); reject(new Error("Face engine took too long to start")); }, 45000);
+    w.onerror = (e) => { clearTimeout(timer); w.terminate(); reject(new Error(e.message || "Face worker failed")); };
+    w.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === "ready") {
+        clearTimeout(timer);
+        resolve({
+          async detect(video, withDescriptor) {
+            const scale = Math.min(1, FRAME_W / video.videoWidth);
+            const frame = await createImageBitmap(video, { resizeWidth: Math.round(video.videoWidth * scale), resizeHeight: Math.round(video.videoHeight * scale), resizeQuality: "medium" });
+            const id = ++seq;
+            return new Promise((ok, fail) => { pending.set(id, { ok, fail }); w.postMessage({ type: "detect", id, frame, withDescriptor }, [frame]); });
+          },
+        });
+      } else if (m.type === "error") { clearTimeout(timer); w.terminate(); reject(new Error(m.message)); }
+      else if (m.type === "result") {
+        const p = pending.get(m.id); pending.delete(m.id);
+        if (!p) return;
+        if (m.error) p.fail(new Error(m.error)); else p.ok(m.result);
+      }
+    };
+    w.postMessage({ type: "init", origin: window.location.origin });
+  });
 }
 
-export type FaceFrame = {
-  yaw: number;        // nose position along the eye line: ≈0.5 facing the camera, lower/higher when turned
-  ear: number;        // eye aspect ratio (open ≈0.3, closed ≈0.1)
-  size: number;       // face width ÷ frame width
-  score: number;      // detector confidence
-  centre: { x: number; y: number }; // face centre, 0..1
-  descriptor?: Float32Array;
-};
+// ── Main-thread engine (fallback) ──────────────────────────────────────────
+async function startMain(): Promise<Engine> {
+  const faceapi: FaceApi = await import("@vladmandic/face-api");
+  const tf = faceapi.tf as unknown as { setBackend: (b: string) => Promise<boolean>; ready: () => Promise<void> };
+  const okGl = await tf.setBackend("webgl").catch(() => false);
+  if (!okGl) await tf.setBackend("cpu");
+  await tf.ready();
+  await Promise.all([
+    faceapi.nets.tinyFaceDetector.loadFromUri("/models"),
+    faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
+    faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
+    faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
+  ]);
+  const c = document.createElement("canvas"); c.width = 160; c.height = 160;
+  const g = c.getContext("2d")!; g.fillStyle = "#888"; g.fillRect(0, 0, 160, 160);
+  const warm: (() => unknown)[] = [
+    async () => { await faceapi.detectAllFaces(c, new faceapi.TinyFaceDetectorOptions({ inputSize: 320 })); },
+    () => faceapi.detectFaceLandmarks(c),
+    () => faceapi.computeFaceDescriptor(c),
+    async () => { await faceapi.detectAllFaces(c, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 })); },
+  ];
+  for (const step of warm) { await nextFrame(); try { await step(); } catch { /* blank canvas */ } }
+  const small = document.createElement("canvas");
+  let tinyMisses = 0;
+  return {
+    async detect(video, withDescriptor) {
+      const scale = Math.min(1, FRAME_W / video.videoWidth);
+      small.width = Math.round(video.videoWidth * scale); small.height = Math.round(video.videoHeight * scale);
+      small.getContext("2d")!.drawImage(video, 0, 0, small.width, small.height);
+      const useSsd = tinyMisses >= 3;
+      const opts = useSsd
+        ? new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, maxResults: 3 })
+        : new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 });
+      const all = withDescriptor
+        ? await faceapi.detectAllFaces(small, opts).withFaceLandmarks().withFaceDescriptors()
+        : await faceapi.detectAllFaces(small, opts).withFaceLandmarks();
+      if (useSsd) tinyMisses = 0; else tinyMisses = all.length ? 0 : tinyMisses + 1;
+      if (all.length === 0) return null;
+      if (all.length > 1) return "many";
+      const f = all[0] as (typeof all)[number] & { descriptor?: Float32Array };
+      return frameFromLandmarks(f.landmarks.positions, f.detection.box, small.width, small.height, f.detection.score, f.descriptor);
+    },
+  };
+}
 
-type P = { x: number; y: number };
-const dist = (a: P, b: P) => Math.hypot(a.x - b.x, a.y - b.y);
-const eyeRatio = (e: P[]) => (dist(e[1], e[5]) + dist(e[2], e[4])) / (2 * Math.max(1, dist(e[0], e[3])));
+/** Face engine ready (models downloaded and warmed up). Uses the worker, or the main thread if workers cannot run TF.js. */
+export function loadFaceApi(): Promise<Engine> {
+  if (engine) return Promise.resolve(engine);
+  if (!starting) {
+    let forceMain = false;
+    try { forceMain = localStorage.getItem("hcm-face-engine") === "main"; } catch { /* ignore */ }
+    const canWorker = !forceMain && typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined" && typeof createImageBitmap !== "undefined";
+    starting = (canWorker ? startWorker().catch((e) => { console.warn("Face worker unavailable, using main thread:", e); return startMain(); }) : startMain())
+      .then((e) => { engine = e; return e; })
+      .catch((e) => { starting = null; throw e; });
+  }
+  return starting;
+}
+
+/** Start loading in the background when the browser is idle. With the worker this costs the page nothing. */
+export function preloadFaceApi() {
+  if (typeof window === "undefined" || starting || engine) return;
+  const go = () => { loadFaceApi().catch(() => undefined); };
+  const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void };
+  if (w.requestIdleCallback) w.requestIdleCallback(go, { timeout: 4000 }); else setTimeout(go, 1500);
+}
 
 /** One frame: exactly one face with landmarks (and optionally its descriptor). null = no face, "many" = several faces. */
 export async function readFace(video: HTMLVideoElement, withDescriptor = false): Promise<FaceFrame | null | "many"> {
-  const faceapi = await loadFaceApi();
-  const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, maxResults: 3 });
-  const all = withDescriptor
-    ? await faceapi.detectAllFaces(video, opts).withFaceLandmarks().withFaceDescriptors()
-    : await faceapi.detectAllFaces(video, opts).withFaceLandmarks();
-  if (all.length === 0) return null;
-  if (all.length > 1) return "many";
-  const f = all[0] as (typeof all)[number] & { descriptor?: Float32Array };
-  const p = f.landmarks.positions;
-  const l = p[36], r = p[45], nose = p[30];
-  const ex = r.x - l.x, ey = r.y - l.y;
-  const yaw = ((nose.x - l.x) * ex + (nose.y - l.y) * ey) / Math.max(1, ex * ex + ey * ey); // robust to head tilt
-  const ear = (eyeRatio(p.slice(36, 42)) + eyeRatio(p.slice(42, 48))) / 2;
-  const box = f.detection.box;
-  return {
-    yaw, ear, size: box.width / video.videoWidth, score: f.detection.score,
-    centre: { x: (box.x + box.width / 2) / video.videoWidth, y: (box.y + box.height / 2) / video.videoHeight },
-    descriptor: f.descriptor,
-  };
+  const e = await loadFaceApi();
+  return e.detect(video, withDescriptor);
 }
 
 export function averageDescriptor(list: Float32Array[]): number[] {

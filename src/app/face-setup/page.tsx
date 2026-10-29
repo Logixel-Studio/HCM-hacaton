@@ -10,6 +10,7 @@ import { Loading } from "@/components/common";
 import { FaceScanner, type FaceResult } from "@/components/face-capture";
 import { useAttendanceRules } from "@/components/clock-card";
 import { rpc, uploadFile } from "@/lib/api";
+import { preloadFaceApi } from "@/lib/face";
 import { useAuth } from "@/lib/auth";
 import { isConfigured } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,7 @@ export default function FaceSetupPage() {
     else if (ctx && !employee) router.replace("/dashboard");
   }, [loading, session, ctx, employee, router]);
 
+  useEffect(() => { preloadFaceApi(); }, []);
   useEffect(() => () => { if (result) URL.revokeObjectURL(result.photoUrl); }, [result]);
 
   async function save() {

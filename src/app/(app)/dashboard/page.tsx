@@ -1,4 +1,5 @@
 "use client";
+import { Fragment } from "react";
 import Link from "next/link";
 import {
   AlertTriangle, Briefcase, CalendarDays, CalendarOff, Clock, FileWarning, GraduationCap, Inbox, LifeBuoy, Megaphone,
@@ -9,6 +10,8 @@ import { ErrorState, SectionCard, Skeleton, StatCard, StatusBadge } from "@/comp
 import { Bars, Donut, TrendArea } from "@/components/charts";
 import { ClockCard, type ShiftInfo, type TodayRecord } from "@/components/clock-card";
 import { useAuth } from "@/lib/auth";
+import { usePrefs } from "@/lib/prefs";
+import { Settings2 } from "lucide-react";
 import { useRows, useRpc } from "@/lib/api";
 import { ROLE_INFO } from "@/lib/roles";
 import { ago, fmtShort, money, periodLabel } from "@/lib/format";
@@ -30,31 +33,15 @@ function greeting() { const h = new Date().getHours(); return h < 12 ? "Good mor
 
 export default function DashboardPage() {
   const { ctx } = useAuth();
+  const { prefs } = usePrefs();
   const { data: s, isLoading, error, refetch } = useRpc<Summary>(["dashboard"], "dashboard_summary");
   const { data: news = [] } = useRows<{ id: string; title: string; body: string; published_at: string }[]>(["announcements", "latest"], (sb) =>
     sb.from("announcements").select("id, title, body, published_at").not("published_at", "is", null).order("published_at", { ascending: false }).limit(3));
 
   if (error) return <ErrorState error={error} onRetry={refetch} />;
-  const first = (ctx?.employee?.full_name || ctx?.full_name || "").split(" ")[0];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-sm text-ink-soft">{ctx?.tenant?.name} · {ctx?.role ? ROLE_INFO[ctx.role].label : ""}</p>
-          <h1 className="font-display text-2xl font-bold text-ink sm:text-3xl">{greeting()}{first ? `, ${first}` : ""}</h1>
-        </div>
-        {!!s?.approvals_waiting && (
-          <Link href="/approvals" className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition hover:opacity-80">
-            <Inbox className="h-4 w-4" />{s.approvals_waiting} waiting for your approval<ArrowRight className="h-4 w-4" />
-          </Link>
-        )}
-      </div>
-
-      {isLoading || !s ? (
-        <div className="grid gap-4 md:grid-cols-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-36" />)}</div>
-      ) : (
-        <>
+  const sections: Record<string, React.ReactNode> = s ? {
+    me: (
+      <div data-tour="dash-me" className="empty:hidden">
           {s.me && (
             <div className="grid gap-4 lg:grid-cols-3">
               <ClockCard today={s.me.today} shift={s.me.shift} />
@@ -79,7 +66,10 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
-
+      </div>
+    ),
+    team: (
+      <div data-tour="dash-team" className="empty:hidden">
           {s.team && (
             <SectionCard icon={Users} title="My team today" subtitle={`${s.team.size} direct and indirect reports`} action={<Link href="/attendance?view=team" className="text-sm font-medium text-brand-600">Team board →</Link>}>
               <div className="grid gap-4 sm:grid-cols-4">
@@ -90,7 +80,10 @@ export default function DashboardPage() {
               </div>
             </SectionCard>
           )}
-
+      </div>
+    ),
+    company: (
+      <div data-tour="dash-company" className="empty:hidden">
           {s.company && (
             <>
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -124,7 +117,10 @@ export default function DashboardPage() {
               </div>
             </>
           )}
-
+      </div>
+    ),
+    payroll: (
+      <div data-tour="dash-payroll" className="empty:hidden">
           {s.payroll && (
             <div className="grid gap-4 lg:grid-cols-3">
               <SectionCard icon={Wallet} title="Payroll" subtitle="Latest run" action={<Link href="/payroll" className="text-sm font-medium text-brand-600">Open →</Link>}>
@@ -144,7 +140,10 @@ export default function DashboardPage() {
               </SectionCard>
             </div>
           )}
-
+      </div>
+    ),
+    news: (
+      <div data-tour="dash-news" className="empty:hidden">
           <div className="grid gap-4 lg:grid-cols-2">
             <SectionCard icon={Megaphone} title="Announcements" action={<Link href="/engagement" className="text-sm font-medium text-brand-600">All →</Link>}>
               {news.length === 0 ? <p className="py-6 text-center text-sm text-ink-soft">No announcements yet.</p> : (
@@ -161,6 +160,31 @@ export default function DashboardPage() {
               </SectionCard>
             )}
           </div>
+      </div>
+    ),
+  } : {};
+  const first = (ctx?.employee?.full_name || ctx?.full_name || "").split(" ")[0];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-sm text-ink-soft">{ctx?.tenant?.name} · {ctx?.role ? ROLE_INFO[ctx.role].label : ""}</p>
+          <h1 className="font-display text-2xl font-bold text-ink sm:text-3xl">{greeting()}{first ? `, ${first}` : ""}</h1>
+        </div>
+        {!!s?.approvals_waiting && (
+          <Link href="/approvals" className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition hover:opacity-80">
+            <Inbox className="h-4 w-4" />{s.approvals_waiting} waiting for your approval<ArrowRight className="h-4 w-4" />
+          </Link>
+        )}
+      </div>
+
+      {isLoading || !s ? (
+        <div className="grid gap-4 md:grid-cols-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-36" />)}</div>
+      ) : (
+        <>
+          {prefs.dashboard.order.filter((k) => !prefs.dashboard.hidden.includes(k)).map((k) => <Fragment key={k}>{sections[k]}</Fragment>)}
+          {prefs.dashboard.hidden.length > 0 && <p className="text-center text-xs text-ink-soft">{prefs.dashboard.hidden.length} section(s) hidden · <Link href="/account/general#dashboard" className="font-medium text-brand-600"><Settings2 className="mr-1 inline h-3.5 w-3.5" />Customise dashboard</Link></p>}
         </>
       )}
     </div>

@@ -72,7 +72,7 @@ These match the brief's modules (M0 to M15):
 
 1. Create a Supabase project, or use your existing empty one.
 
-2. Open SQL Editor and run `supabase/hcm_full_schema.sql` once. It contains migrations 0001 to 0013 in order, and it is safe to run again. If you prefer the CLI, run `supabase link` and then `supabase db push`, which uses the `supabase/migrations` folder.
+2. Open SQL Editor and run `supabase/hcm_full_schema.sql` once. It contains migrations 0001 to 0014 in order, and it is safe to run again. If you prefer the CLI, run `supabase link` and then `supabase db push`, which uses the `supabase/migrations` folder.
 
    If the project already has a `profiles` table, for example from Supabase's starter template, it is upgraded automatically.
 
@@ -104,12 +104,7 @@ These match the brief's modules (M0 to M15):
    - Supabase's built-in email sender only delivers to your own team's addresses and only a few emails per hour. For real employees, add your own SMTP under Authentication → Emails → SMTP Settings (Resend, Brevo, Gmail SMTP, etc.).
    - Add `http://localhost:3000/**` (and later your live domain) to Authentication → URL Configuration → Redirect URLs, so the invite link opens the "Set your password" page.
 
-7. AI copilot (optional):
-   ```
-   supabase functions deploy copilot
-   supabase secrets set ANTHROPIC_API_KEY=your-key
-   ```
-   You can also set `COPILOT_MODEL` to pick a model.
+7. AI copilot: add `GROQ_API_KEY` (free, console.groq.com) and optionally `OPENROUTER_API_KEY` (free models, openrouter.ai) to the hosting environment variables. Groq answers first; if it is busy, rate-limited or out of quota, OpenRouter answers instead. No Supabase function is needed (the old `copilot` Edge Function is no longer used).
 
 8. To make yourself platform super admin, run this in the SQL editor:
    ```
@@ -121,11 +116,33 @@ These match the brief's modules (M0 to M15):
 
 ```
 npm install
-cp .env.example .env.local     # paste the project URL and anon key
+cp .env.example .env.local     # fill in the values
 npm run dev                    # http://localhost:3000
 ```
 
-To deploy, push to Vercel (or any Node host) and set the same two environment variables there.
+To deploy, push to Vercel (or any Node host) and add the same variables under Settings → Environment Variables, then redeploy:
+
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` (server only — email codes and invitations)
+- `RESEND_API_KEY` and `MAIL_FROM` (your verified Resend domain)
+- `GROQ_API_KEY`, `OPENROUTER_API_KEY` (AI copilot)
+
+Without the email variables the app still works: sign-up, code sign-in and password reset fall back to Supabase's own emails, and invitations fall back to the `invite-user` Edge Function.
+
+
+## Own email with OTP codes (Resend)
+
+- Registering a company: name, email, password → a 6-digit code arrives from your domain → the account is created with the email already verified → company setup.
+- Sign in with an email code (no password), and reset a forgotten password with a code.
+- Invitations are sent from your domain too, with an "Accept invitation" button that opens "Set your password".
+- Codes: valid 10 minutes, single use, 5 wrong tries, a new code every 45 seconds, 5 per email and 20 per network address per hour. Only a hash of each code is stored (`email_codes`, server-only).
+
+
+## Personal settings, guided tips and AI chat
+
+- **Settings (`/account`)** for every user, with search: Profile; General (theme, accent, text size, density, privacy mode that hides every money amount, date and time format); Layout & dashboard (start page, sidebar, animations, keyboard shortcuts, dashboard sections and their order); Notifications (per type, desktop pop-ups, sound, quiet hours); Security (sign-in methods, password, sign out other devices or everywhere, your companies); AI & Copilot (answer style, reply language, things the AI remembers, connection status, delete chats); Guided tips; Privacy & data (where data goes, export everything as JSON, delete AI chats); Activity; Speed check; Help & shortcuts; About & legal. Preferences are saved on the account (`profiles.prefs`), so they follow the person to every device.
+- **Guided tips**: the first time someone signs in they get a short welcome tour, and the first time they open each page they get that page's tour. The screen is dimmed and blurred around the highlighted element, with Next, Back, Skip, Auto-play, arrow keys and Esc. Steps adapt to the role. Turn them off or replay any tour in Settings → Guided tips, or from the account menu → "Show me around this page".
+- **AI copilot**: streams answers, keeps the conversation for follow-ups, and has history (search, rename, pin, delete), copy, regenerate, like/dislike, edit-and-resend and stop. Every lookup runs with the asker's own session, so row-level security decides what it sees: owners and HR get company data, managers their team, employees only themselves. Chats are private to each person.
 
 
 ## 4. First run
@@ -154,7 +171,8 @@ To deploy, push to Vercel (or any Node host) and set the same two environment va
 
 ## Face ID
 
-- Library: `@vladmandic/face-api` (TensorFlow.js, MIT). `npm install` copies the three models it needs into `public/models` (about 12 MB, cached by the browser after the first use).
+- Library: `@vladmandic/face-api` (TensorFlow.js, MIT). `npm install` copies the four models it needs into `public/models` (about 12 MB, cached by the browser after the first use).
+- Detection runs in a Web Worker (`src/workers/face.worker.ts`), so the page never freezes. It uses the fast Tiny detector and falls back to SSD MobileNet only when Tiny misses. Models load in the background on the dashboard and setup page, and are warmed up before the camera scan starts. Browsers without worker WebGL fall back to the main thread automatically.
 - When Face ID is required and the person has no face registered, they are taken to `/face-setup` straight after accepting their invite (or signing up / first login). They cannot use the app until it is done. If the company turns off self-enrollment, HR registers the face from the rules screen instead.
 - Setup: look straight (5 samples), turn the head to both sides, blink, then confirm the photo. Clock in or out: look straight, turn once, blink — about 5 seconds.
 - The browser only sends a 128-number face descriptor and a selfie. Matching is done in Postgres (`check_punch`), with a strictness that HR sets (0.45 strict, 0.50 normal, 0.55 relaxed). The stored descriptor cannot be read by any user, not even HR.
@@ -175,7 +193,7 @@ To deploy, push to Vercel (or any Node host) and set the same two environment va
 
 ## 6. Tests
 
-`npm run test:db` runs all migrations on an in-memory Postgres (PGlite) with Supabase stand-ins. It then plays a full company scenario as real signed-in users under RLS. That is 149 checks, covering:
+`npm run test:db` runs all migrations on an in-memory Postgres (PGlite) with Supabase stand-ins. It then plays a full company scenario as real signed-in users under RLS. That is 169 checks, covering:
 
 - sign-up and invites
 - privacy rules

@@ -93,17 +93,29 @@ export function FaceScanner({ mode, onDone, onCancel, compact = false }: { mode:
     let limit = 60000;
     try { const x = Number(localStorage.getItem("hcm-face-timeout")); if (x > 0) limit = x; } catch { /* ignore */ }
 
+    let lastFrame = performance.now(), lastDesc = 0, frameMs = 0;
     while (!stopped.current && i < plan.length) {
+      // Yield to the browser every frame (paint + input) and cap at ~10 checks a second so the page never locks up.
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+      const gap = performance.now() - lastFrame;
+      if (gap < 100) await new Promise((r) => setTimeout(r, 100 - gap));
+      if (stopped.current) return;
       if (performance.now() - t0 > limit) { setError("The face scan took too long. Use good light, remove mask or sunglasses, hold the phone at eye level and try again."); setPhase("error"); stop(); return; }
       const step = plan[i];
-      const f = await readFace(v, step === "straight");
+      const wantDesc = step === "straight" && performance.now() - lastDesc > 300;
+      const started = performance.now();
+      const f = await readFace(v, wantDesc);
+      if (wantDesc) lastDesc = performance.now();
       if (stopped.current) return;
       frames++;
-      const fps = frames / ((performance.now() - t0) / 1000);
+      const now = performance.now();
+      frameMs = frameMs ? frameMs * 0.7 + (now - started) * 0.3 : now - started; // recent detection time
+      lastFrame = now;
+      const fps = 1000 / Math.max(frameMs, 100);
       if (frames % 6 === 1) lastBright = brightness(v);
       if (lastBright && lastBright < 40) { setAligned(false); setHint("It is too dark — move to a brighter place"); continue; }
       if (f === "many") { setAligned(false); setHint("Only one person should be in front of the camera"); continue; }
-      if (!f) { setAligned(false); setHint("Bring your face inside the oval"); await new Promise((r) => setTimeout(r, 80)); continue; }
+      if (!f) { setAligned(false); setHint("Bring your face inside the oval"); continue; }
       if (f.size < 0.2) { setAligned(false); setHint("Move a little closer"); continue; }
       if (f.size > 0.85) { setAligned(false); setHint("Move back a little"); continue; }
       if (Math.abs(f.centre.x - 0.5) > 0.22 || Math.abs(f.centre.y - 0.5) > 0.25) { setAligned(false); setHint("Centre your face in the oval"); continue; }

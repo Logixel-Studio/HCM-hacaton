@@ -1,5 +1,6 @@
 "use client";
 import { useEffect } from "react";
+import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { CalendarCheck2, CheckCircle2, MapPin, ShieldCheck, Sparkles, Wallet } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -16,7 +17,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     if (loading || !session || path.startsWith("/reset-password")) return;
-    router.replace(ctx?.tenant || ctx?.is_platform_admin ? "/dashboard" : "/onboarding");
+    const start = (ctx?.prefs as { startPage?: string } | undefined)?.startPage;
+    router.replace(ctx?.tenant || ctx?.is_platform_admin ? (start && start.startsWith("/") && !start.startsWith("//") ? start : "/dashboard") : "/onboarding");
   }, [session, ctx, loading, router, path]);
 
   if (!isConfigured) return <SetupNotice />;
@@ -25,7 +27,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
     <div className="grid min-h-screen bg-canvas lg:grid-cols-[1fr_1.05fr]">
       <div className="flex flex-col px-6 py-6 sm:px-10 lg:px-16">
         <div className="flex items-center justify-between">
-          <Logo />
+          <Link href="/" aria-label="HCM Master Suite home"><Logo /></Link>
           <ThemeToggle compact />
         </div>
         <div className="flex flex-1 items-center justify-center py-10">

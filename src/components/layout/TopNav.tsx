@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, Building2, Check, ChevronDown, Menu, Moon, Search, Sparkles, Sun, User, LogOut, Palette } from "lucide-react";
+import { Bell, Building2, Check, ChevronDown, Eye, EyeOff, HelpCircle, Menu, Moon, Search, Settings, Sparkles, Sun, User, LogOut, Compass } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar, Dialog, Dropdown, DropdownItem, DropdownLabel, DropdownSeparator, IconButton } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
@@ -12,6 +12,8 @@ import { q, rpc } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { usePrefs } from "@/lib/prefs";
+import { startTour } from "@/components/tour";
 
 type Note = { id: string; title: string; body: string | null; link: string | null; read_at: string | null; created_at: string };
 
@@ -20,10 +22,27 @@ function Notifications() {
   const router = useRouter();
   const { data = [] } = useQuery({ queryKey: ["notifications"], queryFn: () => q<Note[]>((sb) => sb.from("notifications").select("*").order("created_at", { ascending: false }).limit(20)), refetchInterval: 60_000 });
   const unread = data.filter((n) => !n.read_at).length;
+  const { prefs } = usePrefs();
+  const seen = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = new Set(data.map((n) => n.id));
+    if (seen.current === null) { seen.current = ids; return; } // first load: nothing is "new"
+    const fresh = data.filter((n) => !n.read_at && !seen.current!.has(n.id));
+    seen.current = ids;
+    if (!fresh.length) return;
+    const now = new Date(), hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const { on, from, to } = prefs.quiet;
+    const quiet = on && (from <= to ? hm >= from && hm < to : hm >= from || hm < to);
+    if (quiet) return;
+    if (prefs.sound) { try { const a = new AudioContext(), o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; g.gain.setValueAtTime(0.08, a.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + 0.35); o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime + 0.35); } catch { /* audio blocked */ } }
+    if (prefs.desktop && typeof Notification !== "undefined" && Notification.permission === "granted" && document.visibilityState !== "visible") {
+      for (const n of fresh.slice(0, 3)) { const x = new Notification(n.title, { body: n.body ?? undefined, icon: "/icon.svg", tag: n.id }); x.onclick = () => { window.focus(); if (n.link) router.push(n.link); }; }
+    }
+  }, [data, prefs.quiet, prefs.sound, prefs.desktop, router]);
   const markAll = async () => { await rpc("mark_notifications_read", { p_ids: null }); qc.invalidateQueries({ queryKey: ["notifications"] }); };
   return (
     <Dropdown className="w-[22rem] p-0" trigger={
-      <button aria-label="Notifications" className="relative inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-line bg-surface text-ink-soft transition hover:bg-surface-muted hover:text-ink">
+      <button aria-label="Notifications" data-tour="notifications" className="relative inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-line bg-surface text-ink-soft transition hover:bg-surface-muted hover:text-ink">
         <Bell className="h-[18px] w-[18px]" />
         {unread > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-canvas">{unread}</span>}
       </button>
@@ -87,6 +106,7 @@ function CommandSearch({ open, onClose }: { open: boolean; onClose: () => void }
 
 export function TopNav({ onMenuClick, onAskAi }: { onMenuClick: () => void; onAskAi: () => void }) {
   const { ctx, refresh, signOut } = useAuth();
+  const { prefs, setPref } = usePrefs();
   const { resolved, setMode } = useTheme();
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -102,10 +122,10 @@ export function TopNav({ onMenuClick, onAskAi }: { onMenuClick: () => void; onAs
 
   return (
     <header className="flex items-center gap-3">
-      <button onClick={onMenuClick} className="cursor-pointer rounded-xl p-2 text-ink-soft hover:bg-surface-muted lg:hidden" aria-label="Open menu"><Menu className="h-5 w-5" /></button>
+      <button onClick={onMenuClick} data-tour="menu" className="cursor-pointer rounded-xl p-2 text-ink-soft hover:bg-surface-muted lg:hidden" aria-label="Open menu"><Menu className="h-5 w-5" /></button>
 
       <Dropdown align="left" className="w-72" trigger={
-        <button className="flex max-w-[16rem] cursor-pointer items-center gap-2.5 rounded-full border border-line bg-surface py-1.5 pl-1.5 pr-3 shadow-soft transition hover:bg-surface-muted">
+        <button data-tour="company" className="flex max-w-[16rem] cursor-pointer items-center gap-2.5 rounded-full border border-line bg-surface py-1.5 pl-1.5 pr-3 shadow-soft transition hover:bg-surface-muted">
           <span className="brand-gradient flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white">{ctx?.tenant?.name?.[0] ?? <Building2 className="h-4 w-4" />}</span>
           <span className="min-w-0 text-left leading-tight"><span className="block truncate text-sm font-semibold text-ink">{ctx?.tenant?.name ?? "Platform"}</span><span className="block truncate text-[11px] text-ink-soft">{ctx?.role ? ROLE_INFO[ctx.role].label : "Super admin"}</span></span>
           <ChevronDown className="h-4 w-4 shrink-0 text-ink-soft" />
@@ -121,23 +141,26 @@ export function TopNav({ onMenuClick, onAskAi }: { onMenuClick: () => void; onAs
         ))}
       </Dropdown>
 
-      <button onClick={() => setSearchOpen(true)} className="ml-2 hidden h-10 flex-1 max-w-md cursor-pointer items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm text-ink-soft shadow-soft transition hover:text-ink md:flex">
+      <button onClick={() => setSearchOpen(true)} data-tour="search" className="ml-2 hidden h-10 flex-1 max-w-md cursor-pointer items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm text-ink-soft shadow-soft transition hover:text-ink md:flex">
         <Search className="h-4 w-4" /> Search people and pages <kbd className="ml-auto rounded-md bg-surface-muted px-1.5 py-0.5 text-[11px]">Ctrl K</kbd>
       </button>
 
       <div className="ml-auto flex items-center gap-2">
         <IconButton aria-label="Search" className="md:hidden" onClick={() => setSearchOpen(true)}><Search className="h-[18px] w-[18px]" /></IconButton>
+        <IconButton aria-label={prefs.hideMoney ? "Show amounts" : "Hide amounts"} title={prefs.hideMoney ? "Show money amounts" : "Hide money amounts (privacy mode)"} data-tour="privacy" className="hidden sm:inline-flex" onClick={() => setPref("hideMoney", !prefs.hideMoney).catch(() => undefined)}>
+          {prefs.hideMoney ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
+        </IconButton>
         <IconButton aria-label="Toggle theme" className="hidden sm:inline-flex" onClick={() => setMode(resolved === "dark" ? "light" : "dark")}>
           {resolved === "dark" ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
         </IconButton>
         <Notifications />
         {ctx?.tenant && (
-          <button onClick={onAskAi} className="brand-gradient brand-gradient-hover inline-flex h-10 cursor-pointer items-center gap-2 rounded-full px-3 text-sm font-semibold text-white shadow-sm sm:px-4">
+          <button onClick={onAskAi} data-tour="ask-ai" className="brand-gradient brand-gradient-hover inline-flex h-10 cursor-pointer items-center gap-2 rounded-full px-3 text-sm font-semibold text-white shadow-sm sm:px-4">
             <Sparkles className="h-4 w-4" /><span className="hidden sm:inline">Ask AI</span>
           </button>
         )}
         <Dropdown className="w-64" trigger={
-          <button className="flex cursor-pointer items-center gap-2 rounded-full border border-line bg-surface p-1 transition hover:bg-surface-muted md:pr-2.5">
+          <button data-tour="account" className="flex cursor-pointer items-center gap-2 rounded-full border border-line bg-surface p-1 transition hover:bg-surface-muted md:pr-2.5">
             <Avatar name={name} size="sm" />
             <span className="hidden max-w-[9rem] truncate text-sm font-medium text-ink md:block">{name.split(" ")[0]}</span>
           </button>
@@ -145,7 +168,9 @@ export function TopNav({ onMenuClick, onAskAi }: { onMenuClick: () => void; onAs
           <div className="px-3 py-2"><p className="truncate text-sm font-semibold text-ink">{name}</p><p className="truncate text-xs text-ink-soft">{ctx?.email}</p></div>
           <DropdownSeparator />
           {ctx?.employee && <DropdownItem onClick={() => router.push(`/people/${ctx.employee!.id}`)}><User className="h-4 w-4" />My profile</DropdownItem>}
-          <DropdownItem onClick={() => router.push("/profile")}><Palette className="h-4 w-4" />Account & appearance</DropdownItem>
+          <DropdownItem onClick={() => router.push("/account")}><Settings className="h-4 w-4" />Settings</DropdownItem>
+          <DropdownItem onClick={() => startTour()}><Compass className="h-4 w-4" />Show me around this page</DropdownItem>
+          <DropdownItem onClick={() => router.push("/account/help")}><HelpCircle className="h-4 w-4" />Help & shortcuts</DropdownItem>
           <DropdownSeparator />
           <DropdownItem danger onClick={signOut}><LogOut className="h-4 w-4" />Sign out</DropdownItem>
         </Dropdown>

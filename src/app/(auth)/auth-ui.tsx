@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Eye, EyeOff, Lock, Mail, MailCheck, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const icons = { email: Mail, password: Lock, name: User } as const;
@@ -55,4 +55,63 @@ export function GoogleButton({ onClick, loading }: { onClick: () => void; loadin
 
 export function Divider({ label = "or" }: { label?: string }) {
   return <div className="my-5 flex items-center gap-3 text-xs uppercase tracking-wide text-ink-soft"><div className="h-px flex-1 bg-line" />{label}<div className="h-px flex-1 bg-line" /></div>;
+}
+
+/** Six boxes over one real input: typing, paste and phone code autofill all work. */
+export function OtpBoxes({ value, onChange, disabled, error, shake, inputRef }: {
+  value: string; onChange: (v: string) => void; disabled?: boolean; error?: boolean; shake?: number; inputRef?: React.RefObject<HTMLInputElement | null>;
+}) {
+  const [focus, setFocus] = useState(false);
+  return (
+    <div key={shake} className={cn("relative mx-auto grid w-full max-w-[360px] grid-cols-6 gap-2", (shake ?? 0) > 0 && "animate-[otp-shake_.35s_ease]")}>
+      <input ref={inputRef} aria-label="6-digit code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]*" value={value} disabled={disabled}
+        onFocus={() => setFocus(true)} onBlur={() => setFocus(false)} onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        className="absolute inset-0 z-10 h-full w-full cursor-text opacity-0" data-testid="otp-input" />
+      {Array.from({ length: 6 }, (_, i) => {
+        const active = focus && i === Math.min(value.length, 5);
+        return (
+          <span key={i} aria-hidden className={cn("flex h-14 items-center justify-center rounded-2xl border bg-surface font-display text-2xl font-bold text-ink transition",
+            error ? "border-rose-400 bg-rose-50/40 dark:bg-rose-500/10" : active ? "border-brand-500 ring-4 ring-brand-500/15" : value[i] ? "border-brand-300" : "border-line", i === 2 && "mr-2")}>
+            {value[i] ?? (active ? <span className="h-6 w-0.5 animate-pulse rounded bg-brand-500" /> : "")}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** "Check your email" step shared by sign-up, code sign-in and password reset. */
+export function CodeStep({ email, busy, error, shake, wait, onVerify, onResend, onBack, title = "Check your email", children }: {
+  email: string; busy: boolean; error: string | null; shake: number; wait: number; title?: string;
+  onVerify: (code: string) => void; onResend: () => void; onBack: () => void; children?: React.ReactNode;
+}) {
+  const [code, setCode] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { setTimeout(() => ref.current?.focus(), 60); }, []);
+  useEffect(() => { if (error) { setCode(""); ref.current?.focus(); } }, [error, shake]);
+  return (
+    <div className="text-center">
+      <div className="brand-gradient mx-auto flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-lg shadow-brand-500/25"><MailCheck className="h-7 w-7" /></div>
+      <h1 className="mt-5 font-display text-3xl font-bold text-ink">{title}</h1>
+      <p className="mt-2 text-ink-soft">We sent a 6-digit code to <span className="font-medium text-ink">{email}</span>. <button type="button" onClick={onBack} className="cursor-pointer font-semibold text-brand-600 hover:text-brand-700">Change</button></p>
+      <div className="mt-7"><OtpBoxes value={code} onChange={(v) => { setCode(v); if (v.length === 6) onVerify(v); }} disabled={busy} error={!!error} shake={shake} inputRef={ref} /></div>
+      {children}
+      <p className={cn("mt-4 min-h-5 text-sm", error ? "text-rose-600" : "text-ink-soft")} role={error ? "alert" : undefined}>{error ?? (busy ? "Checking…" : "Email open on another device? Just type the code here.")}</p>
+      <button type="button" disabled={busy || code.length !== 6} onClick={() => onVerify(code)}
+        className="brand-gradient brand-gradient-hover mt-4 inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50">
+        {busy ? "Checking…" : "Verify and continue"}
+      </button>
+      <button type="button" disabled={wait > 0 || busy} onClick={onResend} className="mt-3 h-11 w-full cursor-pointer rounded-2xl text-sm font-medium text-ink-soft transition hover:bg-surface-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-60">
+        {wait > 0 ? `Send a new code in 0:${String(wait).padStart(2, "0")}` : "Send a new code"}
+      </button>
+      <p className="mt-2 text-xs text-ink-soft">Can’t find it? Look in Spam or Promotions. The code works for 10 minutes.</p>
+    </div>
+  );
+}
+
+/** Countdown helper for "send a new code". */
+export function useCountdown() {
+  const [wait, setWait] = useState(0);
+  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait((w) => w - 1), 1000); return () => clearTimeout(t); }, [wait]);
+  return [wait, setWait] as const;
 }

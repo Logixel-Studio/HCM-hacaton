@@ -91,7 +91,7 @@
 .dark .text-violet-700 { color: #c4b5fd; } .dark .text-sky-700 { color: #7dd3fc; } .dark .text-brand-700 { color: var(--brand-300); }
 .dark .text-teal-700 { color: #5eead4; } .dark .text-indigo-700 { color: #a5b4fc; }
 
-* { border-color: var(--line); }
+@layer base { * { border-color: var(--line); } }
 html, body { height: 100%; }
 body {
   margin: 0;
@@ -126,6 +126,7 @@ input[type="date"], input[type="time"], input[type="month"] { color-scheme: inhe
   .animate-slidein { animation: slidein .3s cubic-bezier(.16, 1, .3, 1) both; }
   @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
   .animate-float { animation: float 6s ease-in-out infinite; }
+  @keyframes otp-shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-7px); } 40%, 80% { transform: translateX(7px); } }
 }
 
 @media print {
@@ -134,3 +135,42 @@ input[type="date"], input[type="time"], input[type="month"] { color-scheme: inhe
   .print-area { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; border: none !important; color: #000 !important; background: #fff !important; }
   .no-print { display: none !important; }
 }
+
+/* AI copilot answers (rendered from Markdown) */
+.md { font-size: 14.5px; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.md p { margin: 0 0 8px; } .md p:last-child { margin-bottom: 0; }
+.md ul, .md ol { margin: 0 0 8px; padding-left: 20px; } .md ul { list-style: disc; } .md ol { list-style: decimal; } .md li { margin: 3px 0; }
+.md .mdh { font-family: var(--font-display); font-weight: 600; font-size: 15.5px; margin: 10px 0 4px; }
+.md b { font-weight: 600; }
+.md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; background: var(--surface-muted); padding: 1px 6px; border-radius: 6px; }
+.md pre { background: var(--surface-muted); border-radius: 12px; padding: 10px 12px; overflow-x: auto; margin: 0 0 8px; } .md pre code { background: none; padding: 0; }
+.md a { color: var(--brand-600); text-decoration: underline; }
+.md .mdtable { overflow-x: auto; margin: 4px 0 10px; border: 1px solid var(--line); border-radius: 12px; }
+.md table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.md th { text-align: left; font-weight: 600; background: var(--surface-muted); padding: 7px 10px; white-space: nowrap; }
+.md td { padding: 7px 10px; border-top: 1px solid var(--line); }
+.md .caret { display: inline-block; width: 7px; height: 15px; margin-left: 2px; vertical-align: -2px; border-radius: 2px; background: var(--brand-500); animation: caret-blink 1s steps(2) infinite; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+@keyframes dot-bounce { 0%, 80%, 100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-4px); opacity: 1; } }
+.typing-dot { animation: dot-bounce 1.2s infinite ease-in-out; }
+
+/* Personal display preferences (Settings → General) */
+html[data-text="small"] { font-size: 15px; }
+html[data-text="large"] { font-size: 17.5px; }
+html[data-density="compact"] main { --tw-space-y-reverse: 0; }
+html[data-density="compact"] main .p-5 { padding: 1rem; }
+html[data-density="compact"] main .p-6 { padding: 1.15rem; }
+html[data-density="compact"] main .gap-4 { gap: .75rem; }
+html[data-density="compact"] main .space-y-6 > :not(:last-child) { margin-bottom: 1rem; }
+html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+@keyframes tour-progress { from { width: 0; } to { width: 100%; } }
+
+/* Landing page */
+.font-serif-accent { font-family: "Instrument Serif", Georgia, serif; letter-spacing: -0.01em; }
+@keyframes lp-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.lp-marquee { animation: lp-marquee 45s linear infinite; }
+.lp-marquee:hover { animation-play-state: paused; }
+.lp-btn { transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s; }
+.lp-btn:hover { transform: translateY(-2px); }
+.lp ::selection { color: white; }
+@media (prefers-reduced-motion: reduce) { .lp-marquee { animation: none; } }

@@ -5,7 +5,7 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: {
   tabs: { value: T; label: string; count?: number }[]; value: T; onChange: (v: T) => void; className?: string;
 }) {
   return (
-    <div className={cn("inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full bg-surface-muted p-1 no-scrollbar", className)}>
+    <div data-tour="tabs" className={cn("inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full bg-surface-muted p-1 no-scrollbar", className)}>
       {tabs.map((t) => {
         const active = t.value === value;
         return (
